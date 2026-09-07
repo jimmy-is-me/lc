@@ -2,15 +2,50 @@
 /**
  * Plugin Name: 訂單權限與狀態管理
  * Description: 管理 WooCommerce 訂單狀態名稱、可操作狀態與帳號權限。
- * Version: 1.0.3
+ * Version: 1.0.4
  * Author: Custom Development
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
+ * Update URI: https://github.com/jimmy-is-me/lc
  */
 
 defined( 'ABSPATH' ) || exit;
 
 require_once __DIR__ . '/includes/workflows.php';
+
+// ── 自動更新：從 GitHub Releases 取得最新版本 ──────────────────────────────
+add_filter( 'update_plugins_github.com', function( $update, $plugin_data, $plugin_file, $locales ) {
+	if ( 'woo-order-permissions-statuses/woo-order-permissions-statuses.php' !== $plugin_file ) return $update;
+
+	$response = wp_remote_get( 'https://api.github.com/repos/jimmy-is-me/lc/releases/latest', array(
+		'timeout' => 10,
+		'headers' => array( 'Accept' => 'application/vnd.github.v3+json', 'User-Agent' => 'WordPress/' . get_bloginfo( 'version' ) ),
+	) );
+	if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) return $update;
+
+	$release = json_decode( wp_remote_retrieve_body( $response ), true );
+	if ( empty( $release['tag_name'] ) ) return $update;
+
+	$latest = ltrim( $release['tag_name'], 'v' );
+	if ( version_compare( $latest, '1.0.4', '<=' ) ) return $update;
+
+	$zip_url = '';
+	foreach ( (array) ( $release['assets'] ?? array() ) as $asset ) {
+		if ( isset( $asset['browser_download_url'] ) && str_ends_with( $asset['browser_download_url'], '.zip' ) ) {
+			$zip_url = $asset['browser_download_url'];
+			break;
+		}
+	}
+	if ( ! $zip_url ) return $update;
+
+	return array(
+		'slug'    => 'woo-order-permissions-statuses',
+		'version' => $latest,
+		'url'     => $release['html_url'],
+		'package' => $zip_url,
+	);
+}, 10, 4 );
+// ──────────────────────────────────────────────────────────────────────────
 
 final class TGO_Order_Permissions_Statuses {
 	const OPTION = 'tgo_order_permissions_settings';
@@ -106,8 +141,8 @@ final class TGO_Order_Permissions_Statuses {
 	public static function admin_assets() {
 		$screen = get_current_screen();
 		if ( ! $screen || ( 'toplevel_page_tgo-order-permissions' !== $screen->id && 'users' !== $screen->id && false === strpos( $screen->id, 'shop_order' ) && false === strpos( $screen->id, 'wc-orders' ) ) ) return;
-		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.3' );
-		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery' ), '1.0.3', true );
+		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.4' );
+		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery' ), '1.0.4', true );
 		wp_localize_script( 'tgo-order-permissions-admin', 'tgoOrderPermissions', array(
 			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'nonce'   => wp_create_nonce( 'tgo_confirmation' ),
@@ -116,6 +151,29 @@ final class TGO_Order_Permissions_Statuses {
 
 	public static function current_statuses() {
 		return self::woocommerce_active() ? wc_get_order_statuses() : array();
+	}
+
+	/**
+	 * 回傳目前使用者在本外掛的指定角色。
+	 * - owner / shipping / accounting：依帳號設定
+	 * - ''（空字串）：未被指定 → 若為管理員則完全放行，若非管理員同樣放行（WordPress 本身會擋）
+	 */
+	public static function assigned_role( $user_id = 0 ) {
+		$user_id  = $user_id ?: get_current_user_id();
+		$accounts = self::settings()['accounts'];
+		if ( in_array( (int) $user_id, $accounts['owner'], true ) )      return 'owner';
+		if ( in_array( (int) $user_id, $accounts['shipping'], true ) )   return 'shipping';
+		if ( in_array( (int) $user_id, $accounts['accounting'], true ) ) return 'accounting';
+		return '';
+	}
+
+	/**
+	 * 目前使用者是否受角色限制（shipping 或 accounting）。
+	 * 管理員若未被指定任何角色，回傳 false（完全放行）。
+	 */
+	public static function is_restricted_role( $user_id = 0 ) {
+		$role = self::assigned_role( $user_id );
+		return in_array( $role, array( 'shipping', 'accounting' ), true );
 	}
 
 	public static function save_settings() {
@@ -131,7 +189,6 @@ final class TGO_Order_Permissions_Statuses {
 			$settings['accounts'][ $role ] = array_values( array_unique( array_filter( array_map( 'absint', (array) ( $posted['accounts'][ $role ] ?? array() ) ) ) ) );
 		}
 
-		// allowed_statuses 不用 array_intersect 過濾（新建自訂狀態尚未進 wc_get_order_statuses）
 		foreach ( array( 'shipping', 'accounting' ) as $role ) {
 			$settings['allowed_statuses'][ $role ] = array_values( array_filter( array_map( 'sanitize_key', (array) ( $posted['allowed_statuses'][ $role ] ?? array() ) ) ) );
 		}
@@ -142,7 +199,6 @@ final class TGO_Order_Permissions_Statuses {
 		$email_disabled                      = array_map( 'sanitize_key', (array) ( $posted['email_disabled_statuses'] ?? array() ) );
 		$settings['email_disabled_statuses'] = array_values( array_intersect( $email_disabled, array_keys( $current_statuses ) ) );
 
-		// 自訂狀態：保留現有，可新增
 		$settings['custom_statuses'] = self::settings()['custom_statuses'];
 		$new_slug                    = isset( $posted['new_status_slug'] ) ? sanitize_title( $posted['new_status_slug'] ) : '';
 		$new_label                   = isset( $posted['new_status_label'] ) ? sanitize_text_field( $posted['new_status_label'] ) : '';
@@ -150,7 +206,6 @@ final class TGO_Order_Permissions_Statuses {
 			$settings['custom_statuses'][ $new_slug ] = $new_label;
 		}
 
-		// 發票狀態
 		$settings['invoice_statuses'] = array();
 		foreach ( (array) ( $posted['invoice_statuses'] ?? array() ) as $invoice_key => $label ) {
 			$invoice_key = sanitize_key( $invoice_key );
@@ -163,7 +218,6 @@ final class TGO_Order_Permissions_Statuses {
 			$settings['invoice_statuses'][ $new_invoice_slug ] = $new_invoice_label;
 		}
 
-		// 狀態改名
 		$settings['status_labels'] = array();
 		foreach ( $current_statuses as $status_key => $old_label ) {
 			$label = isset( $posted['status_labels'][ $status_key ] ) ? sanitize_text_field( $posted['status_labels'][ $status_key ] ) : '';
@@ -184,15 +238,6 @@ final class TGO_Order_Permissions_Statuses {
 			if ( isset( $statuses[ $status_key ] ) && '' !== $label ) $statuses[ $status_key ] = $label;
 		}
 		return $statuses;
-	}
-
-	public static function assigned_role( $user_id = 0 ) {
-		$user_id  = $user_id ?: get_current_user_id();
-		$accounts = self::settings()['accounts'];
-		if ( in_array( (int) $user_id, $accounts['owner'], true ) )      return 'owner';
-		if ( in_array( (int) $user_id, $accounts['shipping'], true ) )   return 'shipping';
-		if ( in_array( (int) $user_id, $accounts['accounting'], true ) ) return 'accounting';
-		return '';
 	}
 
 	public static function status_names( $keys, $statuses ) {
@@ -229,8 +274,9 @@ final class TGO_Order_Permissions_Statuses {
 	}
 
 	public static function can_change_to_status( $status ) {
-		$role = self::assigned_role();
-		if ( 'owner' === $role || ! in_array( $role, array( 'shipping', 'accounting' ), true ) ) return true;
+		// 未受限角色（owner 或未指定）：完全放行
+		if ( ! self::is_restricted_role() ) return true;
+		$role       = self::assigned_role();
 		$status_key = 0 === strpos( $status, 'wc-' ) ? $status : 'wc-' . $status;
 		return in_array( $status_key, self::settings()['allowed_statuses'][ $role ], true );
 	}
@@ -281,20 +327,21 @@ final class TGO_Order_Permissions_Statuses {
 	}
 
 	public static function prevent_order_deletion( $caps, $cap, $user_id, $args ) {
-		if ( ! in_array( self::assigned_role( $user_id ), array( 'shipping', 'accounting' ), true ) ) return $caps;
+		// 未受限角色（owner 或未指定）：不干涉刪除
+		if ( ! self::is_restricted_role( $user_id ) ) return $caps;
 		if ( in_array( $cap, array( 'delete_shop_order', 'delete_woocommerce_order' ), true ) ) return array( 'do_not_allow' );
 		if ( 'delete_post' !== $cap || empty( $args[0] ) ) return $caps;
 		return 'shop_order' === get_post_type( $args[0] ) ? array( 'do_not_allow' ) : $caps;
 	}
 
 	public static function block_order_delete() {
-		if ( in_array( self::assigned_role(), array( 'shipping', 'accounting' ), true ) ) {
+		if ( self::is_restricted_role() ) {
 			wp_die( '此帳號沒有刪除訂單的權限。', '操作被拒絕', array( 'response' => 403, 'back_link' => true ) );
 		}
 	}
 
 	public static function block_order_note_deletion() {
-		if ( in_array( self::assigned_role(), array( 'shipping', 'accounting' ), true ) ) {
+		if ( self::is_restricted_role() ) {
 			wp_send_json_error( array( 'message' => '無此權限：此帳號不可刪除訂單備註。' ), 403 );
 		}
 	}
@@ -329,7 +376,7 @@ final class TGO_Order_Permissions_Statuses {
 
 				<div class="tgo-card">
 					<h2>帳號與可操作狀態</h2>
-					<p class="description">可為出貨／業務與會計各設定多位帳號。未勾選狀態即不可切換；只有指定為老闆的帳號不限制。</p>
+					<p class="description">可為出貨／業務與會計各設定多位帳號。未勾選狀態即不可切換；只有指定為老闆的帳號不限制。<strong>管理員帳號若被指定為出貨／業務或會計，同樣會受到狀態限制。</strong></p>
 					<table class="widefat striped tgo-table-accounts"><thead><tr><th class="tgo-col-role">帳號類型</th><th class="tgo-col-accounts">指定帳號（可複選）</th><th>可切換的訂單狀態（可複選）</th></tr></thead><tbody>
 					<?php foreach ( array( 'shipping' => '出貨／業務', 'accounting' => '會計', 'owner' => '老闆（全功能）' ) as $role => $title ) : ?>
 					<tr>
