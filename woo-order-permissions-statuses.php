@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 訂單權限與狀態管理
  * Description: 管理 WooCommerce 訂單狀態名稱、可操作狀態與帳號權限。
- * Version: 1.0.4
+ * Version: 1.0.5
  * Author: Custom Development
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
@@ -27,7 +27,7 @@ add_filter( 'update_plugins_github.com', function( $update, $plugin_data, $plugi
 	if ( empty( $release['tag_name'] ) ) return $update;
 
 	$latest = ltrim( $release['tag_name'], 'v' );
-	if ( version_compare( $latest, '1.0.4', '<=' ) ) return $update;
+	if ( version_compare( $latest, '1.0.5', '<=' ) ) return $update;
 
 	$zip_url = '';
 	foreach ( (array) ( $release['assets'] ?? array() ) as $asset ) {
@@ -58,6 +58,8 @@ final class TGO_Order_Permissions_Statuses {
 		add_action( 'admin_notices', array( __CLASS__, 'woocommerce_notice' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'admin_assets' ) );
 		add_filter( 'wc_order_statuses', array( __CLASS__, 'filter_order_statuses' ), 999 );
+		// 訂單編輯頁狀態下拉：依使用者權限過濾（priority 1000，在改名之後）
+		add_filter( 'wc_order_statuses', array( __CLASS__, 'filter_order_statuses_by_user' ), 1000 );
 		add_filter( 'map_meta_cap', array( __CLASS__, 'prevent_order_deletion' ), 20, 4 );
 		add_action( 'woocommerce_before_trash_order', array( __CLASS__, 'block_order_delete' ), 1 );
 		add_action( 'woocommerce_before_delete_order', array( __CLASS__, 'block_order_delete' ), 1 );
@@ -141,8 +143,8 @@ final class TGO_Order_Permissions_Statuses {
 	public static function admin_assets() {
 		$screen = get_current_screen();
 		if ( ! $screen || ( 'toplevel_page_tgo-order-permissions' !== $screen->id && 'users' !== $screen->id && false === strpos( $screen->id, 'shop_order' ) && false === strpos( $screen->id, 'wc-orders' ) ) ) return;
-		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.4' );
-		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery' ), '1.0.4', true );
+		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.5' );
+		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery' ), '1.0.5', true );
 		wp_localize_script( 'tgo-order-permissions-admin', 'tgoOrderPermissions', array(
 			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'nonce'   => wp_create_nonce( 'tgo_confirmation' ),
@@ -238,6 +240,49 @@ final class TGO_Order_Permissions_Statuses {
 			if ( isset( $statuses[ $status_key ] ) && '' !== $label ) $statuses[ $status_key ] = $label;
 		}
 		return $statuses;
+	}
+
+	/**
+	 * 訂單編輯頁的狀態下拉：依目前使用者可切換的狀態過濾。
+	 * - 受限角色（shipping / accounting）：只顯示 allowed_statuses 中的狀態
+	 *   同時確保目前訂單的現有狀態保留在選單中（避免儲存時被誤改）。
+	 * - 未受限（owner 或未指定）：不過濾，顯示全部。
+	 *
+	 * 注意：此 filter 只在後台訂單編輯頁觸發時才需要限制，
+	 * 批次操作已由 filter_order_bulk_actions 單獨處理，
+	 * 所以這裡只在 is_admin() 且是訂單編輯相關頁面才執行。
+	 */
+	public static function filter_order_statuses_by_user( $statuses ) {
+		if ( ! is_admin() || ! self::is_restricted_role() ) return $statuses;
+
+		$role    = self::assigned_role();
+		$allowed = self::settings()['allowed_statuses'][ $role ];
+
+		// 只保留 allowed_statuses 中的狀態
+		$filtered = array_intersect_key( $statuses, array_flip( $allowed ) );
+
+		// 確保目前訂單現有狀態也在選單中（避免畫面異常）
+		if ( ! empty( $_GET['post'] ) ) {
+			$order = wc_get_order( absint( $_GET['post'] ) );
+			if ( $order ) {
+				$current_key = 'wc-' . $order->get_status();
+				if ( isset( $statuses[ $current_key ] ) && ! isset( $filtered[ $current_key ] ) ) {
+					$filtered[ $current_key ] = $statuses[ $current_key ];
+				}
+			}
+		}
+		// HPOS 模式（wc-orders 頁面）
+		if ( ! empty( $_GET['id'] ) ) {
+			$order = wc_get_order( absint( $_GET['id'] ) );
+			if ( $order ) {
+				$current_key = 'wc-' . $order->get_status();
+				if ( isset( $statuses[ $current_key ] ) && ! isset( $filtered[ $current_key ] ) ) {
+					$filtered[ $current_key ] = $statuses[ $current_key ];
+				}
+			}
+		}
+
+		return $filtered;
 	}
 
 	public static function status_names( $keys, $statuses ) {
@@ -432,8 +477,8 @@ final class TGO_Order_Permissions_Statuses {
 				</div>
 
 				<div class="tgo-card">
-					<h2>會計可用的發票狀態</h2>
-					<p class="description">此處設定會計在訂單編輯頁可選擇的發票狀態名稱。清空名稱後，該選項不會顯示。</p>
+					<h2>會計與老闆可用的發票狀態</h2>
+					<p class="description">此處設定會計及老闆在訂單編輯頁可選擇的發票狀態名稱。清空名稱後，該選項不會顯示。</p>
 					<table class="widefat striped tgo-table-invoice"><thead><tr><th>狀態代碼</th><th>顯示名稱</th></tr></thead><tbody>
 					<?php foreach ( $settings['invoice_statuses'] as $key => $label ) : ?>
 					<tr><td><code><?php echo esc_html( $key ); ?></code></td><td><input class="regular-text" type="text" name="invoice_statuses[<?php echo esc_attr( $key ); ?>]" value="<?php echo esc_attr( $label ); ?>"></td></tr>
