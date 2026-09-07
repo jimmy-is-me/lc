@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 訂單權限與狀態管理
  * Description: 管理 WooCommerce 訂單狀態名稱、可操作狀態與帳號權限。
- * Version: 1.0.10
+ * Version: 1.0.11
  * Author: Custom Development
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
@@ -27,7 +27,7 @@ add_filter( 'update_plugins_github.com', function( $update, $plugin_data, $plugi
 	if ( empty( $release['tag_name'] ) ) return $update;
 
 	$latest = ltrim( $release['tag_name'], 'v' );
-	if ( version_compare( $latest, '1.0.10', '<=' ) ) return $update;
+	if ( version_compare( $latest, '1.0.11', '<=' ) ) return $update;
 
 	$zip_url = '';
 	foreach ( (array) ( $release['assets'] ?? array() ) as $asset ) {
@@ -72,6 +72,7 @@ final class TGO_Order_Permissions_Statuses {
 		// ✅ 移除：訂單編輯頁不再顯示「確認狀態」checkbox，只保留訂單總覽列的欄位
 		// add_action( 'woocommerce_admin_order_data_after_order_details', array( __CLASS__, 'order_confirmation_field' ) );
 		add_action( 'wp_ajax_tgo_toggle_order_confirmation', array( __CLASS__, 'toggle_order_confirmation' ) );
+		// ✅ v1.0.11：訂單總覽欄位改為顯示發票狀態文字，不再顯示 checkbox
 		add_filter( 'manage_edit-shop_order_columns', array( __CLASS__, 'add_order_confirmation_column' ), 30 );
 		add_action( 'manage_shop_order_posts_custom_column', array( __CLASS__, 'render_order_confirmation_column' ), 30, 2 );
 		add_filter( 'woocommerce_shop_order_list_table_columns', array( __CLASS__, 'add_order_confirmation_column' ), 30 );
@@ -188,9 +189,9 @@ final class TGO_Order_Permissions_Statuses {
 	public static function admin_assets() {
 		$screen = get_current_screen();
 		if ( ! $screen || ( 'toplevel_page_tgo-order-permissions' !== $screen->id && 'users' !== $screen->id && false === strpos( $screen->id, 'shop_order' ) && false === strpos( $screen->id, 'wc-orders' ) ) ) return;
-		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.10' );
+		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.11' );
 		wp_enqueue_script( 'jquery-ui-sortable' );
-		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery', 'jquery-ui-sortable' ), '1.0.10', true );
+		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery', 'jquery-ui-sortable' ), '1.0.11', true );
 		wp_localize_script( 'tgo-order-permissions-admin', 'tgoOrderPermissions', array(
 			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'nonce'   => wp_create_nonce( 'tgo_confirmation' ),
@@ -402,26 +403,33 @@ final class TGO_Order_Permissions_Statuses {
 		throw new Exception( '無此權限：您不可切換至此訂單狀態。' );
 	}
 
+	/**
+	 * ✅ v1.0.11：欄位名稱改為「發票狀態」
+	 */
 	public static function add_order_confirmation_column( $columns ) {
-		$columns['tgo_confirmation'] = '確認狀態';
+		$columns['tgo_confirmation'] = '發票狀態';
 		return $columns;
 	}
 
-	public static function confirmation_checkbox( $order ) {
-		if ( ! $order ) return '';
-		$checked  = 'yes' === $order->get_meta( '_tgo_accounting_confirmed', true );
-		$disabled = ! in_array( self::assigned_role(), array( 'accounting', 'owner' ), true ) ? ' disabled' : '';
-		return '<label class="tgo-confirm"><input type="checkbox" class="tgo-confirmation-toggle" data-order-id="' . esc_attr( $order->get_id() ) . '" ' . checked( $checked, true, false ) . $disabled . '> 已確認</label>';
+	/**
+	 * ✅ v1.0.11：讀取 _tgo_invoice_status，顯示對應中文標籤，無資料顯示「—」
+	 */
+	public static function get_invoice_status_label( $order ) {
+		if ( ! $order ) return '—';
+		$key = (string) $order->get_meta( '_tgo_invoice_status', true );
+		if ( '' === $key ) return '—';
+		$statuses = self::settings()['invoice_statuses'];
+		return isset( $statuses[ $key ] ) ? esc_html( $statuses[ $key ] ) : esc_html( $key );
 	}
 
 	public static function render_order_confirmation_column( $column, $post_id ) {
 		if ( 'tgo_confirmation' !== $column ) return;
-		echo self::confirmation_checkbox( wc_get_order( $post_id ) );
+		echo self::get_invoice_status_label( wc_get_order( $post_id ) );
 	}
 
 	public static function render_hpos_order_confirmation_column( $column, $order ) {
 		if ( 'tgo_confirmation' !== $column ) return;
-		echo self::confirmation_checkbox( $order );
+		echo self::get_invoice_status_label( $order );
 	}
 
 	// ✅ 保留方法本體（save_order_extra_fields 仍需讀取 tgo_accounting_confirmed），
@@ -430,6 +438,14 @@ final class TGO_Order_Permissions_Statuses {
 		if ( is_numeric( $order ) ) $order = wc_get_order( $order );
 		if ( ! $order || ! in_array( self::assigned_role(), array( 'accounting', 'owner' ), true ) ) return;
 		echo '<p class="form-field"><label><input type="checkbox" name="tgo_accounting_confirmed" value="yes" ' . checked( 'yes', $order->get_meta( '_tgo_accounting_confirmed', true ), false ) . '> 確認狀態</label></p>';
+	}
+
+	// confirmation_checkbox 保留供未來使用，目前訂單總覽不再呼叫
+	public static function confirmation_checkbox( $order ) {
+		if ( ! $order ) return '';
+		$checked  = 'yes' === $order->get_meta( '_tgo_accounting_confirmed', true );
+		$disabled = ! in_array( self::assigned_role(), array( 'accounting', 'owner' ), true ) ? ' disabled' : '';
+		return '<label class="tgo-confirm"><input type="checkbox" class="tgo-confirmation-toggle" data-order-id="' . esc_attr( $order->get_id() ) . '" ' . checked( $checked, true, false ) . $disabled . '> 已確認</label>';
 	}
 
 	public static function toggle_order_confirmation() {
