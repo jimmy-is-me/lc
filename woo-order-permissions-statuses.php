@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 訂單權限與狀態管理
  * Description: 管理 WooCommerce 訂單狀態名稱、可操作狀態與帳號權限。
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Custom Development
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
@@ -14,7 +14,7 @@ require_once __DIR__ . '/includes/workflows.php';
 
 final class TGO_Order_Permissions_Statuses {
 	const OPTION = 'tgo_order_permissions_settings';
-	const NONCE = 'tgo_settings_nonce';
+	const NONCE  = 'tgo_settings_nonce';
 
 	public static function init() {
 		add_action( 'init', array( __CLASS__, 'register_custom_statuses' ), 20 );
@@ -47,13 +47,13 @@ final class TGO_Order_Permissions_Statuses {
 
 	public static function defaults() {
 		return array(
-			'accounts'               => array( 'shipping' => array(), 'accounting' => array(), 'owner' => array() ),
-			'allowed_statuses'       => array( 'shipping' => array(), 'accounting' => array() ),
-			'status_labels'          => array(),
-			'hidden_statuses'        => array(),
-			'custom_statuses'        => array(),
-			'invoice_statuses'       => array( 'issued' => '已開立', 'posted' => '已過帳' ),
-			'email_disabled_statuses'=> array(),
+			'accounts'                => array( 'shipping' => array(), 'accounting' => array(), 'owner' => array() ),
+			'allowed_statuses'        => array( 'shipping' => array(), 'accounting' => array() ),
+			'status_labels'           => array(),
+			'hidden_statuses'         => array(),
+			'custom_statuses'         => array(),
+			'invoice_statuses'        => array( 'issued' => '已開立', 'posted' => '已過帳' ),
+			'email_disabled_statuses' => array(),
 		);
 	}
 
@@ -72,10 +72,6 @@ final class TGO_Order_Permissions_Statuses {
 		$settings['invoice_statuses']        = is_array( $settings['invoice_statuses'] ) ? $settings['invoice_statuses'] : self::defaults()['invoice_statuses'];
 		$settings['email_disabled_statuses'] = array_values( array_filter( array_map( 'sanitize_key', (array) ( $settings['email_disabled_statuses'] ?? array() ) ) ) );
 		return $settings;
-	}
-
-	public static function is_settings_request() {
-		return is_admin() && isset( $_REQUEST['page'] ) && 'tgo-order-permissions' === sanitize_key( wp_unslash( $_REQUEST['page'] ) );
 	}
 
 	public static function register_custom_statuses() {
@@ -110,8 +106,8 @@ final class TGO_Order_Permissions_Statuses {
 	public static function admin_assets() {
 		$screen = get_current_screen();
 		if ( ! $screen || ( 'toplevel_page_tgo-order-permissions' !== $screen->id && 'users' !== $screen->id && false === strpos( $screen->id, 'shop_order' ) && false === strpos( $screen->id, 'wc-orders' ) ) ) return;
-		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.1' );
-		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery' ), '1.0.1', true );
+		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.2' );
+		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery' ), '1.0.2', true );
 		wp_localize_script( 'tgo-order-permissions-admin', 'tgoOrderPermissions', array(
 			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'nonce'   => wp_create_nonce( 'tgo_confirmation' ),
@@ -127,73 +123,73 @@ final class TGO_Order_Permissions_Statuses {
 		if ( ! tgo_can_configure() ) wp_die( '無此權限' );
 		check_admin_referer( self::NONCE );
 
-		$current_statuses = self::current_statuses();
-		$posted           = wp_unslash( $_POST );
-		$settings         = self::defaults();
-		$preset_key       = isset( $posted['tgo_preset'] ) ? sanitize_key( $posted['tgo_preset'] ) : '';
-		$presets          = tgo_presets();
+		$posted     = wp_unslash( $_POST );
+		$preset_key = isset( $posted['tgo_preset'] ) ? sanitize_key( $posted['tgo_preset'] ) : '';
+		$presets    = tgo_presets();
+		$is_preset  = isset( $presets[ $preset_key ] );
+		$settings   = self::defaults();
 
-		// 套用 preset（第一輪：建立自訂狀態與基本設定）
-		if ( isset( $presets[ $preset_key ] ) ) {
+		if ( $is_preset ) {
+			// Preset 套用：直接以 preset 定義為準，全部覆蓋，保留現有帳號指定
 			$preset                                    = $presets[ $preset_key ];
 			$settings['custom_statuses']               = $preset['custom'];
 			$settings['status_labels']                 = $preset['labels'];
 			$settings['allowed_statuses']['shipping']   = $preset['shipping'];
 			$settings['allowed_statuses']['accounting'] = $preset['accounting'];
 			$settings['invoice_statuses']              = $preset['invoice'];
-		}
-
-		foreach ( array( 'shipping', 'accounting', 'owner' ) as $role ) {
-			$settings['accounts'][ $role ] = array_values( array_unique( array_filter( array_map( 'absint', (array) ( $posted['accounts'][ $role ] ?? array() ) ) ) ) );
-		}
-		foreach ( array( 'shipping', 'accounting' ) as $role ) {
-			$selected                              = array_map( 'sanitize_key', (array) ( $posted['allowed_statuses'][ $role ] ?? array() ) );
-			$settings['allowed_statuses'][ $role ] = array_values( array_intersect( $selected, array_keys( $current_statuses ) ) );
-		}
-
-		$hidden                      = array_map( 'sanitize_key', (array) ( $posted['hidden_statuses'] ?? array() ) );
-		$settings['hidden_statuses'] = array_values( array_intersect( $hidden, array_keys( $current_statuses ) ) );
-
-		$email_disabled                          = array_map( 'sanitize_key', (array) ( $posted['email_disabled_statuses'] ?? array() ) );
-		$settings['email_disabled_statuses']     = array_values( array_intersect( $email_disabled, array_keys( $current_statuses ) ) );
-
-		$settings['custom_statuses'] = isset( $settings['custom_statuses'] ) && $settings['custom_statuses'] ? $settings['custom_statuses'] : self::settings()['custom_statuses'];
-
-		$new_slug  = isset( $posted['new_status_slug'] ) ? sanitize_title( $posted['new_status_slug'] ) : '';
-		$new_label = isset( $posted['new_status_label'] ) ? sanitize_text_field( $posted['new_status_label'] ) : '';
-		if ( $new_slug && $new_label && ! isset( $settings['custom_statuses'][ $new_slug ] ) ) {
-			$settings['custom_statuses'][ $new_slug ] = $new_label;
-		}
-
-		$settings['invoice_statuses'] = array();
-		foreach ( (array) ( $posted['invoice_statuses'] ?? array() ) as $invoice_key => $label ) {
-			$invoice_key = sanitize_key( $invoice_key );
-			$label       = sanitize_text_field( $label );
-			if ( $invoice_key && '' !== $label ) $settings['invoice_statuses'][ $invoice_key ] = $label;
-		}
-		$new_invoice_slug  = isset( $posted['new_invoice_slug'] ) ? sanitize_title( $posted['new_invoice_slug'] ) : '';
-		$new_invoice_label = isset( $posted['new_invoice_label'] ) ? sanitize_text_field( $posted['new_invoice_label'] ) : '';
-		if ( $new_invoice_slug && $new_invoice_label && ! isset( $settings['invoice_statuses'][ $new_invoice_slug ] ) ) {
-			$settings['invoice_statuses'][ $new_invoice_slug ] = $new_invoice_label;
-		}
-
-		foreach ( $current_statuses as $status_key => $old_label ) {
-			$label = isset( $posted['status_labels'][ $status_key ] ) ? sanitize_text_field( $posted['status_labels'][ $status_key ] ) : '';
-			if ( '' === $label ) {
-				unset( $settings['status_labels'][ $status_key ] );
-			} else {
-				$settings['status_labels'][ $status_key ] = $label;
+			// 保留現有帳號指定，不因套用範本而清除
+			$existing = self::settings();
+			foreach ( array( 'shipping', 'accounting', 'owner' ) as $role ) {
+				$settings['accounts'][ $role ] = $existing['accounts'][ $role ];
 			}
-		}
+			$settings['hidden_statuses']         = $existing['hidden_statuses'];
+			$settings['email_disabled_statuses'] = $existing['email_disabled_statuses'];
+		} else {
+			// 一般儲存：從表單讀取所有值
+			$current_statuses = self::current_statuses();
 
-		// 套用 preset（第二輪：確保 preset 覆蓋手動輸入的狀態）
-		if ( isset( $presets[ $preset_key ] ) ) {
-			$preset                                    = $presets[ $preset_key ];
-			$settings['custom_statuses']               = $preset['custom'];
-			$settings['status_labels']                 = $preset['labels'];
-			$settings['allowed_statuses']['shipping']   = $preset['shipping'];
-			$settings['allowed_statuses']['accounting'] = $preset['accounting'];
-			$settings['invoice_statuses']              = $preset['invoice'];
+			foreach ( array( 'shipping', 'accounting', 'owner' ) as $role ) {
+				$settings['accounts'][ $role ] = array_values( array_unique( array_filter( array_map( 'absint', (array) ( $posted['accounts'][ $role ] ?? array() ) ) ) ) );
+			}
+
+			// allowed_statuses 不用 array_intersect 過濾（自訂狀態本次剛建立，尚未進 wc_get_order_statuses）
+			foreach ( array( 'shipping', 'accounting' ) as $role ) {
+				$settings['allowed_statuses'][ $role ] = array_values( array_filter( array_map( 'sanitize_key', (array) ( $posted['allowed_statuses'][ $role ] ?? array() ) ) ) );
+			}
+
+			$hidden                      = array_map( 'sanitize_key', (array) ( $posted['hidden_statuses'] ?? array() ) );
+			$settings['hidden_statuses'] = array_values( array_intersect( $hidden, array_keys( $current_statuses ) ) );
+
+			$email_disabled                      = array_map( 'sanitize_key', (array) ( $posted['email_disabled_statuses'] ?? array() ) );
+			$settings['email_disabled_statuses'] = array_values( array_intersect( $email_disabled, array_keys( $current_statuses ) ) );
+
+			// 自訂狀態：保留現有，可新增
+			$settings['custom_statuses'] = self::settings()['custom_statuses'];
+			$new_slug                    = isset( $posted['new_status_slug'] ) ? sanitize_title( $posted['new_status_slug'] ) : '';
+			$new_label                   = isset( $posted['new_status_label'] ) ? sanitize_text_field( $posted['new_status_label'] ) : '';
+			if ( $new_slug && $new_label && ! isset( $settings['custom_statuses'][ $new_slug ] ) ) {
+				$settings['custom_statuses'][ $new_slug ] = $new_label;
+			}
+
+			// 發票狀態
+			$settings['invoice_statuses'] = array();
+			foreach ( (array) ( $posted['invoice_statuses'] ?? array() ) as $invoice_key => $label ) {
+				$invoice_key = sanitize_key( $invoice_key );
+				$label       = sanitize_text_field( $label );
+				if ( $invoice_key && '' !== $label ) $settings['invoice_statuses'][ $invoice_key ] = $label;
+			}
+			$new_invoice_slug  = isset( $posted['new_invoice_slug'] ) ? sanitize_title( $posted['new_invoice_slug'] ) : '';
+			$new_invoice_label = isset( $posted['new_invoice_label'] ) ? sanitize_text_field( $posted['new_invoice_label'] ) : '';
+			if ( $new_invoice_slug && $new_invoice_label && ! isset( $settings['invoice_statuses'][ $new_invoice_slug ] ) ) {
+				$settings['invoice_statuses'][ $new_invoice_slug ] = $new_invoice_label;
+			}
+
+			// 狀態改名
+			$settings['status_labels'] = array();
+			foreach ( $current_statuses as $status_key => $old_label ) {
+				$label = isset( $posted['status_labels'][ $status_key ] ) ? sanitize_text_field( $posted['status_labels'][ $status_key ] ) : '';
+				if ( '' !== $label ) $settings['status_labels'][ $status_key ] = $label;
+			}
 		}
 
 		update_option( self::OPTION, $settings );
@@ -355,7 +351,7 @@ final class TGO_Order_Permissions_Statuses {
 
 				<div class="tgo-card">
 					<h2>套用案件範本</h2>
-					<p class="description">每個網站安裝後選擇一次範本，即會建立該網站的狀態名稱、出貨／業務與會計可操作狀態，以及發票狀態。帳號不會自動指定。</p>
+					<p class="description">每個網站安裝後選擇一次範本，即會建立該網站的狀態名稱、出貨／業務與會計可操作狀態，以及發票狀態。<strong>帳號指定不會被清除。</strong></p>
 					<p><?php foreach ( tgo_presets() as $preset_key => $preset ) : ?><button class="button" type="submit" name="tgo_preset" value="<?php echo esc_attr( $preset_key ); ?>">套用 <?php echo esc_html( $preset['title'] ); ?> 範本</button>&nbsp;<?php endforeach; ?></p>
 				</div>
 
