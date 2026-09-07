@@ -1,1 +1,88 @@
-.tgo-console{max-width:1220px;margin:22px 0 40px}.tgo-hero{padding:26px 30px;border-radius:14px;background:linear-gradient(135deg,#07152d,#122a54 55%,#076b75);color:#edf7ff;box-shadow:0 14px 30px rgba(16,42,84,.2)}.tgo-hero h1{color:#fff;margin:0 0 8px;font-size:28px}.tgo-hero p{margin:0;color:#c7dcfb;font-size:14px}.tgo-card{background:#fff;border:1px solid #dfe7f4;border-radius:12px;padding:22px;margin-top:18px;box-shadow:0 7px 20px rgba(31,56,88,.06)}.tgo-card h2{display:flex;align-items:center;gap:9px;color:#102b55;margin:0 0 8px;font-size:19px}.tgo-card h2:before{content:'';width:7px;height:23px;border-radius:6px;background:linear-gradient(#0ed1c0,#2776ff)}.tgo-card h3{color:#183a6a}.tgo-card .widefat{border:1px solid #d8e3f2;border-radius:8px;overflow:hidden}.tgo-card .widefat thead{background:#f0f6ff}.tgo-card .widefat th{color:#25446f}.tgo-card select[multiple]{border-color:#b8cbe6;background:#fbfdff;min-height:142px}.tgo-card input[type=text]{border-color:#b8cbe6;border-radius:6px}.tgo-card input[type=text]:focus,.tgo-card select:focus{border-color:#2075f5;box-shadow:0 0 0 1px #2075f5}.tgo-chip{display:inline-block;border-radius:999px;padding:3px 9px;background:#e9f5ff;color:#1357a2;font-size:12px;font-weight:600}.tgo-reference{background:linear-gradient(135deg,#f4f8ff,#f2ffff);border:1px solid #cce8ee;border-radius:9px;padding:14px 18px;line-height:1.9}.tgo-save{background:linear-gradient(135deg,#1969f5,#0bb8b1)!important;border:0!important;border-radius:7px!important;padding:5px 18px!important;box-shadow:0 5px 12px rgba(25,105,245,.22)}.tgo-invoice-box{margin:10px 0 16px;padding:14px;border:1px solid #b9d0fa;border-radius:8px;background:linear-gradient(135deg,#f5f9ff,#fff)}.tgo-invoice-box h4{margin:0 0 10px;color:#163c75;font-size:14px}.tgo-invoice-box select{width:100%}.tgo-table-accounts{max-width:1100px}.tgo-table-statuses{max-width:1100px}.tgo-table-invoice{max-width:650px}.tgo-email-note{font-size:12px;line-height:1.6}.tgo-new-status label{display:inline-block;vertical-align:top;margin:0 18px 10px 0}.tgo-new-status small{display:block;max-width:360px;margin-top:4px;color:#667085}.tgo-col-role{width:15%}.tgo-col-accounts{width:34%}.tgo-account-select{width:100%}.tgo-status-choice{display:inline-block;min-width:155px;margin:0 10px 8px 0}.tgo-perm-empty{color:#8c8f94}.tgo-perm-owner{color:#0a7b6f}.tgo-perm-restricted{color:#b32d2e}.tgo-perm-status{color:#50575e}.tgo-confirm{font-weight:600;color:#1d4ed8;white-space:nowrap}
+/* TGO Order Permissions & Statuses - Admin Styles */
+
+.tgo-console .tgo-hero {
+	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+	color: #fff;
+	padding: 32px 40px;
+	border-radius: 12px;
+	margin-bottom: 24px;
+	box-shadow: 0 4px 24px rgba(0,0,0,.18);
+}
+.tgo-console .tgo-hero h1 { margin: 0 0 6px; font-size: 26px; font-weight: 700; }
+.tgo-console .tgo-hero p  { margin: 0; opacity: .8; font-size: 14px; }
+
+.tgo-card {
+	background: #fff;
+	border: 1px solid #e2e8f0;
+	border-radius: 10px;
+	padding: 24px 28px;
+	margin-bottom: 20px;
+	box-shadow: 0 1px 6px rgba(0,0,0,.06);
+}
+.tgo-card h2 { margin-top: 0; font-size: 18px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+.tgo-card h3 { font-size: 15px; margin-top: 20px; }
+
+.tgo-table-accounts th, .tgo-table-accounts td { vertical-align: top; padding: 10px 12px; }
+.tgo-col-role     { width: 140px; }
+.tgo-col-accounts { width: 340px; }
+.tgo-account-select { width: 100%; }
+.tgo-status-choice { display: inline-block; margin: 2px 10px 2px 0; }
+
+.tgo-table-statuses th, .tgo-table-statuses td { vertical-align: middle; padding: 8px 10px; }
+.tgo-table-statuses tbody tr { cursor: default; }
+.tgo-table-statuses tbody tr.ui-sortable-helper { background: #f0f7ff; box-shadow: 0 4px 16px rgba(0,0,0,.14); }
+.tgo-sortable-placeholder { background: #e8f4fd; border: 2px dashed #7ab3e0; height: 46px; }
+
+/* 拒曳把手 */
+.tgo-drag-handle {
+	cursor: grab;
+	color: #aaa;
+	font-size: 18px;
+	padding: 0 6px;
+	user-select: none;
+}
+.tgo-drag-handle:active { cursor: grabbing; }
+
+.tgo-email-note { font-size: 12px; }
+.tgo-new-status { display: flex; gap: 24px; flex-wrap: wrap; }
+.tgo-new-status label { display: flex; flex-direction: column; gap: 4px; }
+
+.tgo-chip {
+	display: inline-block;
+	background: #e0e7ff;
+	color: #3730a3;
+	font-size: 11px;
+	padding: 1px 7px;
+	border-radius: 20px;
+	vertical-align: middle;
+	margin-left: 4px;
+}
+
+.tgo-save { height: 40px; font-size: 15px !important; padding: 0 28px !important; }
+
+.tgo-perm-empty    { color: #aaa; }
+.tgo-perm-owner    { color: #1a7f37; }
+.tgo-perm-restricted { color: #c0392b; font-size: 12px; }
+.tgo-perm-status   { color: #555; font-size: 12px; }
+
+.tgo-reference {
+	background: #f8fafc;
+	border-left: 4px solid #7ab3e0;
+	padding: 14px 18px;
+	border-radius: 6px;
+	font-size: 13px;
+	line-height: 1.8;
+}
+
+.tgo-invoice-box {
+	background: #f8faff;
+	border: 1px solid #c7d9f0;
+	border-radius: 8px;
+	padding: 14px 18px;
+	margin-top: 12px;
+}
+.tgo-invoice-box h4 { margin: 0 0 10px; font-size: 14px; }
+
+.tgo-confirm input[type=checkbox] { margin-right: 4px; }
+
+.tgo-table-invoice th, .tgo-table-invoice td { padding: 8px 10px; }
