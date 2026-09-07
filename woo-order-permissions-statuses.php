@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 訂單權限與狀態管理
  * Description: 管理 WooCommerce 訂單狀態名稱、可操作狀態與帳號權限。
- * Version: 1.0.6
+ * Version: 1.0.7
  * Author: Custom Development
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
@@ -27,7 +27,7 @@ add_filter( 'update_plugins_github.com', function( $update, $plugin_data, $plugi
 	if ( empty( $release['tag_name'] ) ) return $update;
 
 	$latest = ltrim( $release['tag_name'], 'v' );
-	if ( version_compare( $latest, '1.0.6', '<=' ) ) return $update;
+	if ( version_compare( $latest, '1.0.7', '<=' ) ) return $update;
 
 	$zip_url = '';
 	foreach ( (array) ( $release['assets'] ?? array() ) as $asset ) {
@@ -113,6 +113,18 @@ final class TGO_Order_Permissions_Statuses {
 		return $settings;
 	}
 
+	/**
+	 * 回傳所有已知的狀態 key（WooCommerce 內建 + 本外掛自訂）。
+	 * 用於 save_settings() 的白名單，避免 array_intersect 誤刪自訂狀態設定。
+	 */
+	public static function all_known_status_keys() {
+		$keys = array_keys( self::woocommerce_active() ? wc_get_order_statuses() : array() );
+		foreach ( self::settings()['custom_statuses'] as $slug => $label ) {
+			$keys[] = 'wc-tgo-' . sanitize_key( $slug );
+		}
+		return array_unique( $keys );
+	}
+
 	public static function register_custom_statuses() {
 		foreach ( self::settings()['custom_statuses'] as $slug => $label ) {
 			register_post_status( 'wc-tgo-' . sanitize_key( $slug ), array(
@@ -145,10 +157,9 @@ final class TGO_Order_Permissions_Statuses {
 	public static function admin_assets() {
 		$screen = get_current_screen();
 		if ( ! $screen || ( 'toplevel_page_tgo-order-permissions' !== $screen->id && 'users' !== $screen->id && false === strpos( $screen->id, 'shop_order' ) && false === strpos( $screen->id, 'wc-orders' ) ) ) return;
-		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.6' );
-		// jQuery UI Sortable 已內建於 WordPress
+		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.7' );
 		wp_enqueue_script( 'jquery-ui-sortable' );
-		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery', 'jquery-ui-sortable' ), '1.0.6', true );
+		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery', 'jquery-ui-sortable' ), '1.0.7', true );
 		wp_localize_script( 'tgo-order-permissions-admin', 'tgoOrderPermissions', array(
 			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'nonce'   => wp_create_nonce( 'tgo_confirmation' ),
@@ -178,9 +189,27 @@ final class TGO_Order_Permissions_Statuses {
 		if ( ! tgo_can_configure() ) wp_die( '無此權限' );
 		check_admin_referer( self::NONCE );
 
-		$posted           = wp_unslash( $_POST );
-		$current_statuses = self::current_statuses();
-		$settings         = self::defaults();
+		$posted   = wp_unslash( $_POST );
+		$settings = self::defaults();
+
+		// ── 白名單：WooCommerce 內建狀態 + 本外掛已儲存的自訂狀態 ──────────
+		// 注意：save_settings 在 admin_init 執行，此時 register_custom_statuses
+		// 已在 init priority 20 執行，但 wc_get_order_statuses() 回傳的是
+		// WooCommerce 核心狀態，自訂的 wc-tgo-* 需另外補充。
+		$settings['custom_statuses'] = self::settings()['custom_statuses'];
+		$new_slug                    = isset( $posted['new_status_slug'] ) ? sanitize_title( $posted['new_status_slug'] ) : '';
+		$new_label                   = isset( $posted['new_status_label'] ) ? sanitize_text_field( $posted['new_status_label'] ) : '';
+		if ( $new_slug && $new_label && ! isset( $settings['custom_statuses'][ $new_slug ] ) ) {
+			$settings['custom_statuses'][ $new_slug ] = $new_label;
+		}
+
+		// 已知所有狀態 key（含自訂）
+		$all_known_keys = self::all_known_status_keys();
+		// 也要加入剛新增的自訂狀態
+		foreach ( $settings['custom_statuses'] as $slug => $label ) {
+			$all_known_keys[] = 'wc-tgo-' . sanitize_key( $slug );
+		}
+		$all_known_keys = array_unique( $all_known_keys );
 
 		foreach ( array( 'shipping', 'accounting', 'owner' ) as $role ) {
 			$settings['accounts'][ $role ] = array_values( array_unique( array_filter( array_map( 'absint', (array) ( $posted['accounts'][ $role ] ?? array() ) ) ) ) );
@@ -190,21 +219,22 @@ final class TGO_Order_Permissions_Statuses {
 			$settings['allowed_statuses'][ $role ] = array_values( array_filter( array_map( 'sanitize_key', (array) ( $posted['allowed_statuses'][ $role ] ?? array() ) ) ) );
 		}
 
+		// ✅ 修正：改用 $all_known_keys 做白名單，不再遺漏自訂狀態
 		$hidden                      = array_map( 'sanitize_key', (array) ( $posted['hidden_statuses'] ?? array() ) );
-		$settings['hidden_statuses'] = array_values( array_intersect( $hidden, array_keys( $current_statuses ) ) );
+		$settings['hidden_statuses'] = array_values( array_intersect( $hidden, $all_known_keys ) );
 
 		$email_disabled                      = array_map( 'sanitize_key', (array) ( $posted['email_disabled_statuses'] ?? array() ) );
-		$settings['email_disabled_statuses'] = array_values( array_intersect( $email_disabled, array_keys( $current_statuses ) ) );
+		$settings['email_disabled_statuses'] = array_values( array_intersect( $email_disabled, $all_known_keys ) );
 
-		// 狀態順序：接受前端拒曳結果
-		$order_posted            = array_map( 'sanitize_key', (array) ( $posted['status_order'] ?? array() ) );
+		// 狀態順序
+		$order_posted             = array_map( 'sanitize_key', (array) ( $posted['status_order'] ?? array() ) );
 		$settings['status_order'] = array_values( array_filter( $order_posted ) );
 
-		$settings['custom_statuses'] = self::settings()['custom_statuses'];
-		$new_slug                    = isset( $posted['new_status_slug'] ) ? sanitize_title( $posted['new_status_slug'] ) : '';
-		$new_label                   = isset( $posted['new_status_label'] ) ? sanitize_text_field( $posted['new_status_label'] ) : '';
-		if ( $new_slug && $new_label && ! isset( $settings['custom_statuses'][ $new_slug ] ) ) {
-			$settings['custom_statuses'][ $new_slug ] = $new_label;
+		// ✅ 修正：status_labels 迭代對象改為 $all_known_keys，不遺漏自訂狀態改名
+		$settings['status_labels'] = array();
+		foreach ( $all_known_keys as $status_key ) {
+			$label = isset( $posted['status_labels'][ $status_key ] ) ? sanitize_text_field( $posted['status_labels'][ $status_key ] ) : '';
+			if ( '' !== $label ) $settings['status_labels'][ $status_key ] = $label;
 		}
 
 		$settings['invoice_statuses'] = array();
@@ -219,12 +249,6 @@ final class TGO_Order_Permissions_Statuses {
 			$settings['invoice_statuses'][ $new_invoice_slug ] = $new_invoice_label;
 		}
 
-		$settings['status_labels'] = array();
-		foreach ( $current_statuses as $status_key => $old_label ) {
-			$label = isset( $posted['status_labels'][ $status_key ] ) ? sanitize_text_field( $posted['status_labels'][ $status_key ] ) : '';
-			if ( '' !== $label ) $settings['status_labels'][ $status_key ] = $label;
-		}
-
 		update_option( self::OPTION, $settings );
 		wp_safe_redirect( add_query_arg( array( 'page' => 'tgo-order-permissions', 'updated' => 1 ), admin_url( 'admin.php' ) ) );
 		exit;
@@ -232,7 +256,6 @@ final class TGO_Order_Permissions_Statuses {
 
 	/**
 	 * 套用自訂名稱、自訂狀態、排序（priority 999）。
-	 * 排序邏輯：先列出 status_order 中有的項目，剩餘依原始順序追加在後面。
 	 */
 	public static function filter_order_statuses( $statuses ) {
 		$settings = self::settings();
@@ -252,11 +275,9 @@ final class TGO_Order_Permissions_Statuses {
 		if ( ! empty( $order ) ) {
 			$sorted   = array();
 			$all_keys = array_keys( $statuses );
-			// 先列出已排序的項目
 			foreach ( $order as $key ) {
 				if ( isset( $statuses[ $key ] ) ) $sorted[ $key ] = $statuses[ $key ];
 			}
-			// 剩餘未排序的狀態（新增自訂狀態或 WooCommerce 更新新增）追加在後
 			foreach ( $all_keys as $key ) {
 				if ( ! isset( $sorted[ $key ] ) ) $sorted[ $key ] = $statuses[ $key ];
 			}
@@ -272,8 +293,8 @@ final class TGO_Order_Permissions_Statuses {
 	public static function filter_order_statuses_by_user( $statuses ) {
 		if ( ! is_admin() || ! self::is_restricted_role() ) return $statuses;
 
-		$role    = self::assigned_role();
-		$allowed = self::settings()['allowed_statuses'][ $role ];
+		$role     = self::assigned_role();
+		$allowed  = self::settings()['allowed_statuses'][ $role ];
 		$filtered = array_intersect_key( $statuses, array_flip( $allowed ) );
 
 		// 確保目前訂單現有狀態在選單中
@@ -479,19 +500,17 @@ final class TGO_Order_Permissions_Statuses {
 
 				<div class="tgo-card">
 					<h2>網站目前的訂單狀態名稱</h2>
-					<p class="description">可直接修改名稱或勾選隱藏。<strong>拒曳左側 ☰ 把手可調整順序，順序會同步至訂單編輯下拉與批次操作選單。</strong>狀態代碼與既有訂單資料不會改變。隱藏後不會出現在一般狀態選單，但不會刪除既有訂單資料。</p>
+					<p class="description">可直接修改名稱或勾選隱藏。<strong>拖曳左側 ☰ 把手可調整順序，順序會同步至訂單編輯下拉與批次操作選單。</strong>狀態代碼與既有訂單資料不會改變。隱藏後不會出現在一般狀態選單，但不會刪除既有訂單資料。</p>
 					<table class="widefat striped tgo-table-statuses">
 						<thead><tr><th style="width:32px"></th><th>狀態代碼</th><th>目前名稱</th><th>改為顯示名稱</th><th>預設 WooCommerce 信件</th><th>隱藏此狀態</th></tr></thead>
 						<tbody>
 						<?php foreach ( $display_statuses as $status_key => $label ) :
-							// 設定頁顯示原始名稱（未改名前）
 							$original_label = $statuses[ $status_key ] ?? $label;
-							// 改為顯示名稱欄位的現有內容
 							$custom_label   = $settings['status_labels'][ $status_key ] ?? $original_label;
 							$email_info     = self::status_email_info( $status_key );
 						?>
 						<tr data-status-key="<?php echo esc_attr( $status_key ); ?>">
-							<td><span class="tgo-drag-handle" title="拒曳排序">☰</span></td>
+							<td><span class="tgo-drag-handle" title="拖曳排序">☰</span></td>
 							<td><code><?php echo esc_html( $status_key ); ?></code></td>
 							<td><?php echo esc_html( $original_label ); ?></td>
 							<td><input type="text" class="regular-text" name="status_labels[<?php echo esc_attr( $status_key ); ?>]" value="<?php echo esc_attr( $custom_label ); ?>"></td>
