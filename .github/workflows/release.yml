@@ -17,8 +17,11 @@ jobs:
       - name: Build installable ZIP
         run: |
           mkdir -p dist
-          cd woo-order-permissions-statuses
-          zip -r ../dist/woo-order-permissions-statuses-${GITHUB_REF_NAME}.zip . -x '*.DS_Store'
+          zip -r dist/woo-order-permissions-statuses-${GITHUB_REF_NAME}.zip . \
+            --exclude '*.git*' \
+            --exclude '*.DS_Store' \
+            --exclude 'dist/*' \
+            --exclude '.github/*'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
