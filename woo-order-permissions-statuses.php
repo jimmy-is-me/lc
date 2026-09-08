@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 訂單權限與狀態管理
  * Description: 管理 WooCommerce 訂單狀態名稱、可操作狀態與帳號權限。
- * Version: 1.0.11
+ * Version: 1.0.12
  * Author: Custom Development
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
@@ -27,7 +27,7 @@ add_filter( 'update_plugins_github.com', function( $update, $plugin_data, $plugi
 	if ( empty( $release['tag_name'] ) ) return $update;
 
 	$latest = ltrim( $release['tag_name'], 'v' );
-	if ( version_compare( $latest, '1.0.11', '<=' ) ) return $update;
+	if ( version_compare( $latest, '1.0.12', '<=' ) ) return $update;
 
 	$zip_url = '';
 	foreach ( (array) ( $release['assets'] ?? array() ) as $asset ) {
@@ -72,7 +72,7 @@ final class TGO_Order_Permissions_Statuses {
 		// ✅ 移除：訂單編輯頁不再顯示「確認狀態」checkbox，只保留訂單總覽列的欄位
 		// add_action( 'woocommerce_admin_order_data_after_order_details', array( __CLASS__, 'order_confirmation_field' ) );
 		add_action( 'wp_ajax_tgo_toggle_order_confirmation', array( __CLASS__, 'toggle_order_confirmation' ) );
-		// ✅ v1.0.11：訂單總覽欄位改為顯示發票狀態文字，不再顯示 checkbox
+		// ✅ v1.0.11+：訂單總覽欄位改為顯示發票狀態文字，不再顯示 checkbox
 		add_filter( 'manage_edit-shop_order_columns', array( __CLASS__, 'add_order_confirmation_column' ), 30 );
 		add_action( 'manage_shop_order_posts_custom_column', array( __CLASS__, 'render_order_confirmation_column' ), 30, 2 );
 		add_filter( 'woocommerce_shop_order_list_table_columns', array( __CLASS__, 'add_order_confirmation_column' ), 30 );
@@ -189,9 +189,9 @@ final class TGO_Order_Permissions_Statuses {
 	public static function admin_assets() {
 		$screen = get_current_screen();
 		if ( ! $screen || ( 'toplevel_page_tgo-order-permissions' !== $screen->id && 'users' !== $screen->id && false === strpos( $screen->id, 'shop_order' ) && false === strpos( $screen->id, 'wc-orders' ) ) ) return;
-		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.11' );
+		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.12' );
 		wp_enqueue_script( 'jquery-ui-sortable' );
-		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery', 'jquery-ui-sortable' ), '1.0.11', true );
+		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery', 'jquery-ui-sortable' ), '1.0.12', true );
 		wp_localize_script( 'tgo-order-permissions-admin', 'tgoOrderPermissions', array(
 			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'nonce'   => wp_create_nonce( 'tgo_confirmation' ),
@@ -404,7 +404,7 @@ final class TGO_Order_Permissions_Statuses {
 	}
 
 	/**
-	 * ✅ v1.0.11：欄位名稱改為「發票狀態」
+	 * ✅ v1.0.11+：欄位名稱「發票狀態」
 	 */
 	public static function add_order_confirmation_column( $columns ) {
 		$columns['tgo_confirmation'] = '發票狀態';
@@ -412,7 +412,7 @@ final class TGO_Order_Permissions_Statuses {
 	}
 
 	/**
-	 * ✅ v1.0.11：讀取 _tgo_invoice_status，顯示對應中文標籤，無資料顯示「—」
+	 * ✅ v1.0.11+：讀取 _tgo_invoice_status，顯示對應中文標籤，無資料顯示「—」
 	 */
 	public static function get_invoice_status_label( $order ) {
 		if ( ! $order ) return '—';
@@ -617,11 +617,11 @@ final class TGO_Order_Permissions_Statuses {
 					<div class="tgo-reference">
 						<strong>享物後台：</strong><br>
 						出貨／業務帳號：不可刪除訂單；僅能切換以下訂單狀態：1.保留中（尚未出貨）2.處理中（出貨中）3.已完成（出貨完成）4.已取消（未出即退）5.已退貨／未退款（已收到退貨可退款）<br>
-						會計帳號：不可刪除訂單；僅能切換以下款項狀態：1.已退款（退款完成）2.已收款（金流核對完成）－（狀態可切換，在訂單列表出現確認狀態可以勾選）<br>
+						會計帳號：不可刪除訂單；僅能切換以下款項狀態：1.已退款（退款完成）2.已收款（金流核對完成）－（狀態可切換，訂單列表可看到發票狀態）<br>
 						老闆帳號：開放完整後台功能與所有訂單狀態操作權限<br><br>
 						<strong>LC 後台：</strong><br>
 						出貨／業務帳號：不可刪除訂單；僅能切換以下狀態：1.保留中（尚未出貨）2.已處理（一般出貨完成）3.展備品已處理（展備出貨完成）4.已退貨，未退款（已收到退貨）5.已取消（未出及退）6.對帳中（業務結算）7.樣品已回收（展品、樣品回收）<br>
-						會計帳號：不可刪除訂單；僅能切換以下狀態：1.已開發票（已提供對帳單）2.已收款（確認收到款項）3.已退款（已扣入下一期款項／匯款給對方）－ 發票狀態採獨立勾選方式管理<br>
+						會計帳號：不可刪除訂單；僅能切換以下狀態：1.已開發票（已提供對帳單）2.已收款（確認收到款項）3.已退款（已扣入下一期款項／匯款給對方）－ 訂單列表可看到發票狀態（專欄顯示）<br>
 						老闆帳號：開放完整後台功能與所有訂單狀態操作權限
 					</div>
 				</div>
