@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 訂單權限與狀態管理
  * Description: 管理 WooCommerce 訂單狀態名稱、可操作狀態與帳號權限。
- * Version: 1.0.12
+ * Version: 1.0.13
  * Author: Custom Development
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
@@ -27,7 +27,7 @@ add_filter( 'update_plugins_github.com', function( $update, $plugin_data, $plugi
 	if ( empty( $release['tag_name'] ) ) return $update;
 
 	$latest = ltrim( $release['tag_name'], 'v' );
-	if ( version_compare( $latest, '1.0.12', '<=' ) ) return $update;
+	if ( version_compare( $latest, '1.0.13', '<=' ) ) return $update;
 
 	$zip_url = '';
 	foreach ( (array) ( $release['assets'] ?? array() ) as $asset ) {
@@ -82,6 +82,9 @@ final class TGO_Order_Permissions_Statuses {
 		foreach ( array( 'customer_processing_order', 'customer_completed_order', 'customer_on_hold_order', 'customer_refunded_order' ) as $email_id ) {
 			add_filter( 'woocommerce_email_enabled_' . $email_id, array( __CLASS__, 'maybe_disable_status_email' ), 20, 2 );
 		}
+		// ✅ v1.0.13：訂單列表頂部 subsubsub 同步自訂狀態名稱、移除「屬於目前登入使用者」簽籤
+		add_filter( 'views_edit-shop_order', array( __CLASS__, 'filter_order_views' ), 20 );
+		add_filter( 'woocommerce_order_list_table_views', array( __CLASS__, 'filter_order_views' ), 20 );
 	}
 
 	public static function defaults() {
@@ -128,8 +131,6 @@ final class TGO_Order_Permissions_Statuses {
 
 	/**
 	 * 取得未經本外掛 filter 處理的原始 WooCommerce 訂單狀態清單。
-	 * 暫時移除自己的 filter hooks 再呼叫 wc_get_order_statuses()，
-	 * 確保隱藏狀態仍包含在內（用於設定面板顯示）。
 	 */
 	public static function raw_statuses() {
 		if ( ! self::woocommerce_active() ) return array();
@@ -143,7 +144,6 @@ final class TGO_Order_Permissions_Statuses {
 
 	/**
 	 * 取得指定帳號用的使用者清單。
-	 * 排除純訂閱者／會員角色（subscriber、customer）。
 	 */
 	public static function get_assignable_users() {
 		$exclude_roles = array( 'subscriber', 'customer' );
@@ -189,9 +189,9 @@ final class TGO_Order_Permissions_Statuses {
 	public static function admin_assets() {
 		$screen = get_current_screen();
 		if ( ! $screen || ( 'toplevel_page_tgo-order-permissions' !== $screen->id && 'users' !== $screen->id && false === strpos( $screen->id, 'shop_order' ) && false === strpos( $screen->id, 'wc-orders' ) ) ) return;
-		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.12' );
+		wp_enqueue_style( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.css', __FILE__ ), array(), '1.0.13' );
 		wp_enqueue_script( 'jquery-ui-sortable' );
-		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery', 'jquery-ui-sortable' ), '1.0.12', true );
+		wp_enqueue_script( 'tgo-order-permissions-admin', plugins_url( 'assets/admin.js', __FILE__ ), array( 'jquery', 'jquery-ui-sortable' ), '1.0.13', true );
 		wp_localize_script( 'tgo-order-permissions-admin', 'tgoOrderPermissions', array(
 			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'nonce'   => wp_create_nonce( 'tgo_confirmation' ),
@@ -278,8 +278,37 @@ final class TGO_Order_Permissions_Statuses {
 	}
 
 	/**
+	 * ✅ v1.0.13：訂單列表頂部 subsubsub 簽籤列同步自訂狀態名稱，並移除「屬於目前登入使用者」(mine)。
+	 * 同時支援傳統模式（views_edit-shop_order）和 HPOS（woocommerce_order_list_table_views）。
+	 */
+	public static function filter_order_views( $views ) {
+		// 移除 mine（屬於目前登入使用者）
+		unset( $views['mine'] );
+
+		$renamed = self::settings()['status_labels'];
+		if ( empty( $renamed ) ) return $views;
+
+		// 對每個 view 的連結文字依 status_labels 改名
+		// view key 如 'wc-pending'，對應 status_labels 也是 'wc-pending'
+		foreach ( $views as $view_key => $view_html ) {
+			// view_key 可能是 'wc-pending' 或 'pending'，統一轉成 'wc-xxx' 來比對
+			$status_key = ( 0 === strpos( $view_key, 'wc-' ) ) ? $view_key : 'wc-' . $view_key;
+			if ( ! isset( $renamed[ $status_key ] ) ) continue;
+
+			$new_label = esc_html( $renamed[ $status_key ] );
+			// 用 regex 替換 <a> 標籤內的文字（保留 <span class="count">...</span> 不動）
+			$views[ $view_key ] = preg_replace(
+				'#(<a[^>]*>)(.+?)(<span[^>]*>.*?</span>\s*</a>|</a>)#su',
+				'${1}' . $new_label . ' ${3}',
+				$view_html
+			);
+		}
+
+		return $views;
+	}
+
+	/**
 	 * 套用自訂名稱、自訂狀態、排序、移除隱藏狀態（priority 999）。
-	 * 給訂單下拉、批次操作使用；設定面板用 raw_statuses()。
 	 */
 	public static function filter_order_statuses( $statuses ) {
 		$settings = self::settings();
@@ -316,23 +345,17 @@ final class TGO_Order_Permissions_Statuses {
 
 	/**
 	 * 依使用者權限過濾訂單狀態下拉（priority 1000）。
-	 * ✅ 只在「單一訂單編輯頁」執行，避免影響訂單總覽列表的顯示範圍。
-	 * 訂單總覽頁會計帳號仍可看到所有訂單，只是不能切換到不允許的狀態。
+	 * ✅ 只在「單一訂單編輯頁」執行。
 	 */
 	public static function filter_order_statuses_by_user( $statuses ) {
 		if ( ! is_admin() || ! self::is_restricted_role() ) return $statuses;
 
-		// ✅ 只在單一訂單編輯頁才過濾狀態下拉
-		// 訂單總覽（edit-shop_order / wc-orders 列表）不過濾，讓會計能看到所有訂單
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 		if ( $screen ) {
-			// 訂單列表頁：不過濾，直接回傳
 			if ( 'edit-shop_order' === $screen->id || 'woocommerce_page_wc-orders' === $screen->id ) {
 				return $statuses;
 			}
 		} else {
-			// get_current_screen() 尚未初始化（極早期呼叫）：
-			// 若沒有 post/id 參數（即不在單一訂單編輯頁），直接回傳不過濾
 			$post_id = absint( $_GET['post'] ?? 0 ) ?: absint( $_GET['id'] ?? 0 );
 			if ( ! $post_id ) return $statuses;
 		}
@@ -341,7 +364,6 @@ final class TGO_Order_Permissions_Statuses {
 		$allowed  = self::settings()['allowed_statuses'][ $role ];
 		$filtered = array_intersect_key( $statuses, array_flip( $allowed ) );
 
-		// 確保目前訂單現有狀態在選單中（不讓下拉顯示空白）
 		foreach ( array( $_GET['post'] ?? 0, $_GET['id'] ?? 0 ) as $oid ) {
 			if ( ! $oid ) continue;
 			$order = wc_get_order( absint( $oid ) );
@@ -432,15 +454,13 @@ final class TGO_Order_Permissions_Statuses {
 		echo self::get_invoice_status_label( $order );
 	}
 
-	// ✅ 保留方法本體（save_order_extra_fields 仍需讀取 tgo_accounting_confirmed），
-	// 但 hook 已從 init() 移除，訂單編輯頁不再輸出此欄位。
+	// ✅ 保留方法本體（save_order_extra_fields 仍需讀取 tgo_accounting_confirmed）
 	public static function order_confirmation_field( $order ) {
 		if ( is_numeric( $order ) ) $order = wc_get_order( $order );
 		if ( ! $order || ! in_array( self::assigned_role(), array( 'accounting', 'owner' ), true ) ) return;
 		echo '<p class="form-field"><label><input type="checkbox" name="tgo_accounting_confirmed" value="yes" ' . checked( 'yes', $order->get_meta( '_tgo_accounting_confirmed', true ), false ) . '> 確認狀態</label></p>';
 	}
 
-	// confirmation_checkbox 保留供未來使用，目前訂單總覽不再呼叫
 	public static function confirmation_checkbox( $order ) {
 		if ( ! $order ) return '';
 		$checked  = 'yes' === $order->get_meta( '_tgo_accounting_confirmed', true );
@@ -497,7 +517,6 @@ final class TGO_Order_Permissions_Statuses {
 		if ( ! tgo_can_configure() ) return;
 		$settings = self::settings();
 
-		// ✅ 用 raw_statuses() 取得未經本外掛過濾的原始狀態清單
 		$raw      = self::raw_statuses();
 		$statuses = $raw;
 
